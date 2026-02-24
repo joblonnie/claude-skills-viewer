@@ -89,8 +89,9 @@ PORT=4000 npx claude-skills-viewer
 | `PUT` | `/api/skills/:name` | 스킬 추가 (body: SKILL.md 내용) |
 | `DELETE` | `/api/skills/:name` | 스킬 삭제 |
 
-## 요구사항
+## 지원 플랫폼
 
+- macOS, Windows, Linux
 - Node.js 18+
 - 인터넷 연결 (marked.js CDN, 최초 1회)
 

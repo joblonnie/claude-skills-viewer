@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0] - 2026-02-24
+
+### Fixed
+- Windows/Linux 크로스 플랫폼 지원
+  - 심볼릭 링크를 절대경로 + junction 방식으로 변경 (Windows 관리자 권한 불필요)
+  - 브라우저 자동 열기를 플랫폼별 분기 처리 (`open`/`start`/`xdg-open`)
+
 ## [1.1.0] - 2026-02-24
 
 ### Added

@@ -100,9 +100,9 @@ async function handleAddSkill(dirName, content) {
   await mkdir(agentPath, { recursive: true });
   await writeFile(join(agentPath, 'SKILL.md'), content, 'utf-8');
 
-  // Create symlink (relative path)
+  // Create symlink (absolute path for cross-platform compatibility)
   try {
-    await symlink(join('../../.agents/skills', dirName), linkPath);
+    await symlink(agentPath, linkPath, 'junction');
   } catch (e) {
     if (e.code !== 'EEXIST') throw e;
   }
@@ -792,8 +792,12 @@ server.on('error', (err) => {
 
 server.on('listening', () => {
   console.log(`\n  Skills Viewer running at http://localhost:${currentPort}\n`);
+  const url = `http://localhost:${currentPort}`;
   import('node:child_process').then(({ exec }) => {
-    exec(`open http://localhost:${currentPort}`);
+    const cmd = process.platform === 'win32' ? `start ${url}`
+              : process.platform === 'darwin' ? `open ${url}`
+              : `xdg-open ${url}`;
+    exec(cmd);
   });
 });
 
