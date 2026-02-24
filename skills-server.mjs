@@ -360,6 +360,24 @@ function getHtml() {
     }
     .confirm-add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+    .fav-btn {
+      background: none; border: none; cursor: pointer; font-size: 16px;
+      color: var(--text-tertiary); padding: 0 2px; line-height: 1;
+      transition: color 0.15s, transform 0.15s;
+    }
+    .fav-btn:hover { color: var(--orange); transform: scale(1.2); }
+    .fav-btn.active { color: var(--orange); }
+    .fav-filter-btn {
+      background: none; border: 1px solid var(--border);
+      color: var(--text-secondary); width: 34px; height: 34px;
+      border-radius: var(--radius); cursor: pointer; font-size: 16px;
+      display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+    }
+    .fav-filter-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .fav-filter-btn.active {
+      border-color: var(--accent); color: var(--accent); background: var(--accent-subtle);
+    }
+
     .loading { opacity: 0.5; pointer-events: none; }
 
     @media (max-width: 480px) {
@@ -381,6 +399,7 @@ function getHtml() {
       <span class="icon">&#128269;</span>
       <input type="text" id="search" placeholder="스킬 검색 (이름, 설명, 태그...)" autofocus>
     </div>
+    <button class="fav-filter-btn" id="fav-filter-btn" onclick="toggleFavFilter()" title="즐겨찾기만 보기">☆</button>
     <button class="add-btn" onclick="showAddDialog()">+ 추가</button>
     <button class="theme-btn" id="theme-btn" onclick="toggleTheme()"></button>
   </div>
@@ -400,6 +419,8 @@ function getHtml() {
 let skills = [];
 let searchQuery = '';
 let expandedCard = null;
+let favorites = new Set(JSON.parse(localStorage.getItem('skills-viewer-favorites') || '[]'));
+let showFavoritesOnly = false;
 
 // --- API ---
 async function fetchSkills() {
@@ -427,12 +448,33 @@ async function apiAdd(dirName, content) {
 const searchEl = document.getElementById('search');
 searchEl.addEventListener('input', (e) => { searchQuery = e.target.value.toLowerCase(); render(); });
 
+// --- Favorites ---
+function saveFavorites() {
+  localStorage.setItem('skills-viewer-favorites', JSON.stringify([...favorites]));
+}
+
+function toggleFavorite(dirName) {
+  if (favorites.has(dirName)) favorites.delete(dirName);
+  else favorites.add(dirName);
+  saveFavorites();
+  render();
+}
+
+function toggleFavFilter() {
+  showFavoritesOnly = !showFavoritesOnly;
+  const btn = document.getElementById('fav-filter-btn');
+  btn.textContent = showFavoritesOnly ? '\\u2605' : '\\u2606';
+  btn.classList.toggle('active', showFavoritesOnly);
+  render();
+}
+
 // --- Render ---
 function render() {
   const grid = document.getElementById('skills-grid');
   const noResults = document.getElementById('no-results');
 
   const filtered = skills.filter(s => {
+    if (showFavoritesOnly && !favorites.has(s.dirName)) return false;
     if (!searchQuery) return true;
     const haystack = [s.name, s.dirName, s.description, ...s.tags, s.category, ...s.subcategories].join(' ').toLowerCase();
     return haystack.includes(searchQuery);
@@ -443,10 +485,12 @@ function render() {
   noResults.style.display = 'none';
   grid.innerHTML = filtered.map(s => {
     const expanded = expandedCard === s.dirName;
+    const isFav = favorites.has(s.dirName);
     return '<div class="skill-card ' + (expanded ? 'expanded' : '') + '" data-name="' + s.dirName + '">' +
       '<div class="skill-card-header" onclick="toggleCard(\\'' + s.dirName + '\\')">' +
         '<div class="skill-name"><code>/' + s.dirName + '</code>' +
           (s.version ? '<span class="skill-version">v' + s.version + '</span>' : '') +
+          '<button class="fav-btn' + (isFav ? ' active' : '') + '" onclick="event.stopPropagation(); toggleFavorite(\\'' + s.dirName + '\\')" title="즐겨찾기">' + (isFav ? '\\u2605' : '\\u2606') + '</button>' +
         '</div>' +
         '<div class="skill-description">' + escapeHtml(s.description) + '</div>' +
         '<div class="skill-meta">' +
@@ -725,10 +769,32 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`\n  Skills Viewer running at http://localhost:${PORT}\n`);
-  // Auto-open browser
+const MAX_PORT_RETRIES = 5;
+let currentPort = PORT;
+let retries = 0;
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    retries++;
+    if (retries > MAX_PORT_RETRIES) {
+      console.error(`\n  포트 ${PORT}~${currentPort} 모두 사용 중입니다.`);
+      console.error(`  다른 포트를 지정해주세요: npx claude-skills-viewer --port <포트번호>\n`);
+      process.exit(1);
+    }
+    currentPort++;
+    console.warn(`  포트 ${currentPort - 1}이(가) 사용 중입니다. ${currentPort}번으로 시도합니다...`);
+    server.listen(currentPort);
+  } else {
+    console.error(err);
+    process.exit(1);
+  }
+});
+
+server.on('listening', () => {
+  console.log(`\n  Skills Viewer running at http://localhost:${currentPort}\n`);
   import('node:child_process').then(({ exec }) => {
-    exec(`open http://localhost:${PORT}`);
+    exec(`open http://localhost:${currentPort}`);
   });
 });
+
+server.listen(currentPort);
