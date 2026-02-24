@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.3.0] - 2026-02-24
+
+### Added
+- 프로젝트 스킬 지원: 특정 프로젝트의 `.claude/skills/` 스킬을 함께 표시
+- 프로젝트 관리 다이얼로그: OS 폴더 선택기로 프로젝트 경로 추가/제거
+- 프로젝트 목록 영속 저장 (`~/.claude/skills-viewer.json`)
+- 스킬 카드에 Personal/Project 스코프 배지 표시
+- 설명이 없는 스킬에 "설명이 없습니다" 플레이스홀더 표시
+- 카드 헤더 최소 높이 보장으로 레이아웃 안정화
+
+### Changed
+- 테마 변경: Dark → Dracula, Light → Minimal Mist
+
+### API
+- `GET /api/projects` — 등록된 프로젝트 목록
+- `PUT /api/projects` — 프로젝트 추가
+- `DELETE /api/projects` — 프로젝트 제거
+- `GET /api/pick-folder` — OS 네이티브 폴더 선택기
+
 ## [1.2.0] - 2026-02-24
 
 ### Fixed

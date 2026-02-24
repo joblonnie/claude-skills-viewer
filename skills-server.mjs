@@ -15,7 +15,8 @@
 import { createServer } from 'node:http';
 import { readdir, readFile, realpath, stat, rm, mkdir, writeFile, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { homedir, platform } from 'node:os';
+import { execSync } from 'node:child_process';
 
 // CLI 인자에서 --port 파싱
 function getPort() {
@@ -29,6 +30,23 @@ function getPort() {
 const PORT = getPort();
 const SKILLS_DIR = join(homedir(), '.claude', 'skills');
 const AGENTS_DIR = join(homedir(), '.agents', 'skills');
+const CONFIG_PATH = join(homedir(), '.claude', 'skills-viewer.json');
+
+// 설정 파일에서 프로젝트 목록 로드/저장
+async function loadConfig() {
+  try {
+    const data = JSON.parse(await readFile(CONFIG_PATH, 'utf-8'));
+    return { projects: data.projects || [] };
+  } catch { return { projects: [] }; }
+}
+
+async function saveConfig() {
+  await mkdir(join(homedir(), '.claude'), { recursive: true });
+  await writeFile(CONFIG_PATH, JSON.stringify({ projects: [...projectDirs] }, null, 2), 'utf-8');
+}
+
+// 프로젝트 경로 목록 (설정 파일에 영속 저장)
+const projectDirs = new Set();
 
 // --- Skill loading ---
 
@@ -50,14 +68,14 @@ async function parseSkillMd(content) {
   return { meta, body: m[2].trim() };
 }
 
-async function loadSkills() {
-  const entries = await readdir(SKILLS_DIR).catch(() => []);
+async function loadSkillsFrom(dir, scope) {
+  const entries = await readdir(dir).catch(() => []);
   const skills = [];
 
   for (const entry of entries) {
     if (entry.startsWith('.')) continue;
     try {
-      const resolved = await realpath(join(SKILLS_DIR, entry));
+      const resolved = await realpath(join(dir, entry));
       const s = await stat(resolved);
       if (!s.isDirectory()) continue;
 
@@ -74,11 +92,23 @@ async function loadSkills() {
         category: meta.category || 'general',
         subcategories: Array.isArray(meta.subcategories) ? meta.subcategories : meta.subcategories ? [meta.subcategories] : [],
         charCount: body.length,
+        scope,
         body,
       });
     } catch {}
   }
-  return skills.sort((a, b) => a.name.localeCompare(b.name));
+  return skills;
+}
+
+async function loadSkills() {
+  const projectLoads = [...projectDirs].map(dir =>
+    loadSkillsFrom(join(dir, '.claude', 'skills'), dir)
+  );
+  const [personal, ...projectResults] = await Promise.all([
+    loadSkillsFrom(SKILLS_DIR, 'personal'),
+    ...projectLoads,
+  ]);
+  return [...personal, ...projectResults.flat()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // --- API handlers ---
@@ -129,25 +159,30 @@ function getHtml() {
   <title>Claude Code Skills Viewer</title>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"><\/script>
   <style>
+    /* Dracula Dark */
     :root {
-      --bg: #0d1117; --bg-secondary: #161b22; --bg-tertiary: #21262d;
-      --border: #30363d; --text: #e6edf3; --text-secondary: #8b949e;
-      --text-tertiary: #6e7681; --accent: #58a6ff; --accent-subtle: #388bfd26;
-      --green: #3fb950; --orange: #d29922; --red: #f85149; --radius: 8px;
+      --bg: #282a36; --bg-secondary: #21222c; --bg-tertiary: #343746;
+      --border: #44475a; --text: #f8f8f2; --text-secondary: #9ca0b0;
+      --text-tertiary: #6272a4; --accent: #8be9fd; --accent-subtle: #8be9fd1a;
+      --green: #50fa7b; --orange: #ffb86c; --red: #ff5555; --radius: 8px;
+      --purple: #bd93f9; --cyan: #8be9fd;
     }
+    /* Minimal Mist */
     @media (prefers-color-scheme: light) {
       :root:not([data-theme="dark"]) {
-        --bg: #ffffff; --bg-secondary: #f6f8fa; --bg-tertiary: #eaeef2;
-        --border: #d0d7de; --text: #1f2328; --text-secondary: #656d76;
-        --text-tertiary: #8c959f; --accent: #0969da; --accent-subtle: #0969da1a;
-        --green: #1a7f37; --orange: #9a6700; --red: #d1242f;
+        --bg: #f7f8fa; --bg-secondary: #eef0f4; --bg-tertiary: #e3e6eb;
+        --border: #d5d9e0; --text: #2c3e50; --text-secondary: #5a6a7e;
+        --text-tertiary: #9ba8b7; --accent: #4a90d9; --accent-subtle: #4a90d91a;
+        --green: #27ae60; --orange: #e67e22; --red: #e74c3c;
+        --purple: #8e44ad; --cyan: #17a2b8;
       }
     }
     [data-theme="light"] {
-      --bg: #ffffff; --bg-secondary: #f6f8fa; --bg-tertiary: #eaeef2;
-      --border: #d0d7de; --text: #1f2328; --text-secondary: #656d76;
-      --text-tertiary: #8c959f; --accent: #0969da; --accent-subtle: #0969da1a;
-      --green: #1a7f37; --orange: #9a6700; --red: #d1242f;
+      --bg: #f7f8fa; --bg-secondary: #eef0f4; --bg-tertiary: #e3e6eb;
+      --border: #d5d9e0; --text: #2c3e50; --text-secondary: #5a6a7e;
+      --text-tertiary: #9ba8b7; --accent: #4a90d9; --accent-subtle: #4a90d91a;
+      --green: #27ae60; --orange: #e67e22; --red: #e74c3c;
+      --purple: #8e44ad; --cyan: #17a2b8;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -210,7 +245,7 @@ function getHtml() {
     }
     .skill-card:hover { border-color: var(--accent); transform: translateY(-1px); }
     .skill-card.expanded { grid-column: 1 / -1; }
-    .skill-card-header { padding: 16px 20px; }
+    .skill-card-header { padding: 16px 20px; min-height: 120px; }
     .skill-name {
       font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px;
     }
@@ -221,9 +256,17 @@ function getHtml() {
       font-size: 11px; color: var(--text-tertiary);
       background: var(--bg-tertiary); padding: 1px 6px; border-radius: 4px;
     }
+    .scope-badge {
+      font-size: 10px; padding: 1px 6px; border-radius: 4px; font-weight: 500;
+    }
+    .scope-badge.personal { background: #388bfd26; color: var(--accent); }
+    .scope-badge.project { background: #3fb95026; color: var(--green); }
     .skill-description {
       color: var(--text-secondary); font-size: 13px; margin-top: 8px;
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .skill-description.empty {
+      color: var(--text-tertiary); font-style: italic;
     }
     .skill-card.expanded .skill-description { -webkit-line-clamp: unset; }
     .skill-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
@@ -380,6 +423,35 @@ function getHtml() {
 
     .loading { opacity: 0.5; pointer-events: none; }
 
+    .project-list { margin-bottom: 12px; }
+    .project-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px; background: var(--bg);
+      border: 1px solid var(--border); border-radius: 6px; margin-bottom: 6px;
+    }
+    .project-item code {
+      flex: 1; font-size: 12px; color: var(--green); overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+    .project-item .remove-btn {
+      background: none; border: none; color: var(--text-tertiary);
+      cursor: pointer; font-size: 18px; line-height: 1; padding: 0 4px;
+      transition: color 0.15s;
+    }
+    .project-item .remove-btn:hover { color: var(--red); }
+    .project-empty {
+      color: var(--text-tertiary); font-size: 13px; padding: 16px 0;
+      text-align: center;
+    }
+    .browse-add-btn {
+      background: var(--accent-subtle); border: 1px dashed var(--accent);
+      color: var(--accent); padding: 8px; border-radius: 6px;
+      font-size: 13px; cursor: pointer; width: 100%;
+      transition: all 0.15s; margin-bottom: 16px;
+    }
+    .browse-add-btn:hover { background: var(--accent); color: var(--bg); }
+
     @media (max-width: 480px) {
       .skills-grid { grid-template-columns: 1fr; }
       .header-inner { flex-direction: column; align-items: stretch; }
@@ -400,6 +472,7 @@ function getHtml() {
       <input type="text" id="search" placeholder="스킬 검색 (이름, 설명, 태그...)" autofocus>
     </div>
     <button class="fav-filter-btn" id="fav-filter-btn" onclick="toggleFavFilter()" title="즐겨찾기만 보기">☆</button>
+    <button class="add-btn" onclick="showProjectDialog()">+ 프로젝트</button>
     <button class="add-btn" onclick="showAddDialog()">+ 추가</button>
     <button class="theme-btn" id="theme-btn" onclick="toggleTheme()"></button>
   </div>
@@ -490,9 +563,11 @@ function render() {
       '<div class="skill-card-header" onclick="toggleCard(\\'' + s.dirName + '\\')">' +
         '<div class="skill-name"><code>/' + s.dirName + '</code>' +
           (s.version ? '<span class="skill-version">v' + s.version + '</span>' : '') +
+          '<span class="scope-badge ' + s.scope + '">' + (s.scope === 'personal' ? 'Personal' : 'Project') + '</span>' +
           '<button class="fav-btn' + (isFav ? ' active' : '') + '" onclick="event.stopPropagation(); toggleFavorite(\\'' + s.dirName + '\\')" title="즐겨찾기">' + (isFav ? '\\u2605' : '\\u2606') + '</button>' +
         '</div>' +
-        '<div class="skill-description">' + escapeHtml(s.description) + '</div>' +
+        '<div class="skill-description' + (s.description ? '' : ' empty') + '">' + (s.description ? escapeHtml(s.description) : '설명이 없습니다') + '</div>' +
+        (s.scope !== 'personal' ? '<div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">' + escapeHtml(s.scope) + '</div>' : '') +
         '<div class="skill-meta">' +
           '<span class="tag size">' + Math.round(s.charCount / 1000) + 'K chars</span>' +
           s.tags.slice(0, 5).map(t => '<span class="tag">' + t + '</span>').join('') +
@@ -665,6 +740,112 @@ function parseFrontmatter(content) {
   return meta;
 }
 
+// --- Project management ---
+let projects = [];
+
+async function fetchProjects() {
+  const res = await fetch('/api/projects');
+  projects = await res.json();
+}
+
+function showProjectDialog() {
+  let pending = [...projects];
+
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.innerHTML =
+    '<div class="dialog">' +
+      '<h3>프로젝트 스킬 관리</h3>' +
+      '<p>프로젝트를 등록하면 해당 경로의 <code>.claude/skills/</code> 스킬을 함께 표시합니다.</p>' +
+      '<div class="project-list" id="pending-list"></div>' +
+      '<button class="browse-add-btn" id="browse-add-btn">+ 폴더 선택하여 추가</button>' +
+      '<div class="dialog-actions">' +
+        '<button class="cancel-btn" id="proj-cancel-btn">취소</button>' +
+        '<button class="confirm-add-btn" id="proj-confirm-btn" style="width:auto;padding:8px 20px">확인</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  function renderList() {
+    const list = overlay.querySelector('#pending-list');
+    if (pending.length === 0) {
+      list.innerHTML = '<div class="project-empty">등록된 프로젝트가 없습니다</div>';
+      return;
+    }
+    list.innerHTML = pending.map((p, i) =>
+      '<div class="project-item">' +
+        '<code title="' + escapeHtml(p) + '">' + escapeHtml(p) + '</code>' +
+        '<button class="remove-btn" data-idx="' + i + '">&times;</button>' +
+      '</div>'
+    ).join('');
+    list.querySelectorAll('.remove-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        pending.splice(parseInt(btn.dataset.idx), 1);
+        renderList();
+      });
+    });
+  }
+
+  renderList();
+
+  overlay.querySelector('#browse-add-btn').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#browse-add-btn');
+    btn.disabled = true; btn.textContent = '폴더 선택 중...';
+    try {
+      const res = await fetch('/api/pick-folder');
+      const data = await res.json();
+      if (data.path && !pending.includes(data.path)) {
+        pending.push(data.path);
+        renderList();
+      } else if (data.path) {
+        showToast('이미 추가된 경로입니다', true);
+      }
+    } catch {}
+    btn.disabled = false; btn.textContent = '+ 폴더 선택하여 추가';
+  });
+
+  overlay.querySelector('#proj-cancel-btn').addEventListener('click', () => overlay.remove());
+
+  overlay.querySelector('#proj-confirm-btn').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#proj-confirm-btn');
+    btn.disabled = true; btn.textContent = '적용 중...';
+
+    // 제거된 프로젝트 삭제
+    for (const p of projects) {
+      if (!pending.includes(p)) {
+        await fetch('/api/projects', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: p }),
+        });
+      }
+    }
+    // 새로 추가된 프로젝트 등록
+    let errors = [];
+    for (const p of pending) {
+      if (!projects.includes(p)) {
+        const res = await fetch('/api/projects', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: p }),
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          errors.push(data.error);
+        }
+      }
+    }
+
+    overlay.remove();
+    await fetchProjects();
+    await fetchSkills();
+
+    if (errors.length) showToast(errors.join('\\n'), true);
+    else showToast('프로젝트 목록이 업데이트되었습니다');
+  });
+}
+
 // --- Keyboard ---
 document.addEventListener('keydown', (e) => {
   if (e.key === '/' && document.activeElement !== searchEl && !document.activeElement.closest('.dialog')) {
@@ -702,7 +883,7 @@ function toggleTheme() {
 applyTheme(localStorage.getItem('skills-viewer-theme') || 'system');
 
 // --- Init ---
-fetchSkills();
+fetchProjects().then(() => fetchSkills());
 <\/script>
 </body>
 </html>`;
@@ -759,6 +940,75 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // GET /api/pick-folder — open native folder picker
+    if (req.method === 'GET' && url.pathname === '/api/pick-folder') {
+      try {
+        let selected = '';
+        const p = process.platform;
+        if (p === 'darwin') {
+          selected = execSync(
+            `osascript -e 'POSIX path of (choose folder with prompt "프로젝트 폴더를 선택하세요")'`,
+            { encoding: 'utf-8', timeout: 60000 }
+          ).trim().replace(/\/$/, '');
+        } else if (p === 'win32') {
+          selected = execSync(
+            `powershell -Command "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description = 'Select project folder'; if($f.ShowDialog() -eq 'OK'){$f.SelectedPath}"`,
+            { encoding: 'utf-8', timeout: 60000 }
+          ).trim();
+        } else {
+          selected = execSync(
+            `zenity --file-selection --directory --title="프로젝트 폴더 선택" 2>/dev/null || kdialog --getexistingdirectory ~ 2>/dev/null`,
+            { encoding: 'utf-8', timeout: 60000 }
+          ).trim();
+        }
+        if (!selected) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ cancelled: true }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ path: selected }));
+      } catch {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ cancelled: true }));
+      }
+      return;
+    }
+
+    // GET /api/projects — list registered project paths
+    if (req.method === 'GET' && url.pathname === '/api/projects') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify([...projectDirs]));
+      return;
+    }
+
+    // PUT /api/projects — add a project path (body = JSON { path })
+    if (req.method === 'PUT' && url.pathname === '/api/projects') {
+      const { path: dirPath } = JSON.parse(await readBody(req));
+      const skillsPath = join(dirPath, '.claude', 'skills');
+      const s = await stat(skillsPath).catch(() => null);
+      if (!s || !s.isDirectory()) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: `${skillsPath} 경로에 스킬이 없습니다` }));
+        return;
+      }
+      projectDirs.add(dirPath);
+      await saveConfig();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, projects: [...projectDirs] }));
+      return;
+    }
+
+    // DELETE /api/projects — remove a project path (body = JSON { path })
+    if (req.method === 'DELETE' && url.pathname === '/api/projects') {
+      const { path: dirPath } = JSON.parse(await readBody(req));
+      projectDirs.delete(dirPath);
+      await saveConfig();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, projects: [...projectDirs] }));
+      return;
+    }
+
     // 404
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
@@ -801,4 +1051,8 @@ server.on('listening', () => {
   });
 });
 
-server.listen(currentPort);
+// 설정 파일에서 프로젝트 목록 로드 후 서버 시작
+loadConfig().then(config => {
+  for (const p of config.projects) projectDirs.add(p);
+  server.listen(currentPort);
+});

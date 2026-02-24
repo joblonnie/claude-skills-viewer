@@ -36,11 +36,21 @@ PORT=4000 npx claude-skills-viewer
 서버는 아래 디렉토리를 사용합니다:
 
 ```
-~/.claude/skills/           # 설치된 스킬 (심볼릭 링크)
-~/.agents/skills/           # 스킬 원본 디렉토리
+~/.claude/skills/              # 설치된 스킬 (심볼릭 링크)
+~/.agents/skills/              # 스킬 원본 디렉토리
+~/.claude/skills-viewer.json   # 프로젝트 목록 설정 (자동 생성)
+<프로젝트>/.claude/skills/     # 프로젝트별 스킬
 ```
 
 ## 기능
+
+### 프로젝트 스킬
+
+- 헤더의 `+ 프로젝트` 버튼으로 프로젝트 관리 다이얼로그 열기
+- OS 폴더 선택기로 프로젝트 경로 추가 (macOS/Windows/Linux)
+- 등록된 프로젝트의 `.claude/skills/` 스킬을 Personal 스킬과 함께 표시
+- 각 스킬 카드에 `Personal` / `Project` 스코프 배지 표시
+- 프로젝트 목록은 `~/.claude/skills-viewer.json`에 저장되어 서버 재시작 후에도 유지
 
 ### 검색
 
@@ -88,6 +98,10 @@ PORT=4000 npx claude-skills-viewer
 | `GET` | `/api/skills` | 전체 스킬 목록 (JSON) |
 | `PUT` | `/api/skills/:name` | 스킬 추가 (body: SKILL.md 내용) |
 | `DELETE` | `/api/skills/:name` | 스킬 삭제 |
+| `GET` | `/api/projects` | 등록된 프로젝트 목록 |
+| `PUT` | `/api/projects` | 프로젝트 추가 (body: `{ path }`) |
+| `DELETE` | `/api/projects` | 프로젝트 제거 (body: `{ path }`) |
+| `GET` | `/api/pick-folder` | OS 네이티브 폴더 선택기 |
 
 ## 지원 플랫폼
 
