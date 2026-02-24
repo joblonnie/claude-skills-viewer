@@ -1,0 +1,31 @@
+{
+  "name": "claude-skills-viewer",
+  "version": "1.0.0",
+  "description": "Claude Code 스킬을 브라우저에서 조회, 추가, 삭제할 수 있는 로컬 뷰어",
+  "type": "module",
+  "bin": {
+    "claude-skills-viewer": "./skills-server.mjs"
+  },
+  "files": [
+    "skills-server.mjs",
+    "README.md"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "skills",
+    "viewer",
+    "skill-manager",
+    "anthropic"
+  ],
+  "author": "lonnie",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "homepage": ""
+}
